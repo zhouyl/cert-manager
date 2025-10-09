@@ -139,31 +139,46 @@ class DatabaseManager:
             ''', (domain,))
 
             row = cursor.fetchone()
+            # 使用 UTC 时间与数据库保持一致
+            now = datetime.utcnow()
+
             if not row:
                 # 首次请求，记录并允许
                 self.record_acme_attempt(domain)
                 return True
 
-            last_attempt = datetime.fromisoformat(row['last_attempt'])
+            # SQLite 存储的是 UTC 时间，需要转换
+            last_attempt_str = row['last_attempt']
+            # 如果时间字符串没有时区信息，假设是本地时间
+            if '+' not in last_attempt_str and 'Z' not in last_attempt_str:
+                last_attempt = datetime.fromisoformat(last_attempt_str)
+            else:
+                last_attempt = datetime.fromisoformat(last_attempt_str.replace('Z', '+00:00'))
+
             attempt_count = row['attempt_count']
-            now = datetime.now()
 
             # 检查是否在限制时间内
             time_diff = now - last_attempt
             if time_diff.total_seconds() < limit_minutes * 60:
-                logger.warning(f"域名 {domain} 在速率限制中，上次尝试: {last_attempt}, 需等待: {limit_minutes}分钟")
+                logger.warning(f"域名 {domain} 在速率限制中，上次尝试: {last_attempt}")
+                logger.warning(f"已尝试 {attempt_count} 次，需等待 {limit_minutes} 分钟")
+                remaining_seconds = limit_minutes * 60 - time_diff.total_seconds()
+                logger.warning(f"剩余等待时间: {remaining_seconds:.0f} 秒")
+                # 增加尝试计数但不允许继续
+                self.record_acme_attempt(domain, increment=True)
                 return False
 
-            # 超过限制时间，重置计数并允许
+            # 超过限制时间，记录新的尝试并允许
             self.record_acme_attempt(domain, reset=True)
             return True
 
-    def record_acme_attempt(self, domain: str, reset: bool = False) -> None:
+    def record_acme_attempt(self, domain: str, reset: bool = False, increment: bool = False) -> None:
         """记录 ACME 尝试
 
         Args:
             domain: 域名
             reset: 是否重置计数
+            increment: 是否只增加计数（不更新时间）
         """
         with self.get_connection() as conn:
             if reset:
@@ -172,6 +187,14 @@ class DatabaseManager:
                     UPDATE acme_rate_limits
                     SET last_attempt = CURRENT_TIMESTAMP,
                         attempt_count = 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE domain = ?
+                ''', (domain,))
+            elif increment:
+                # 只增加计数，不更新时间
+                conn.execute('''
+                    UPDATE acme_rate_limits
+                    SET attempt_count = attempt_count + 1,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE domain = ?
                 ''', (domain,))
