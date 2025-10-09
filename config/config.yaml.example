@@ -1,0 +1,58 @@
+# 证书管理器配置文件示例
+# 复制此文件为 config.yaml 并根据你的环境进行配置
+
+# acme.sh 配置
+acme:
+  # acme.sh 脚本路径
+  script_path: "$HOME/.acme.sh/acme.sh"
+
+  # 默认 CA (letsencrypt, zerossl, buypass)
+  ca: "letsencrypt"
+
+  # 证书存储目录
+  cert_dir: "./certs"
+
+# Cloudflare 配置 (固定使用 Cloudflare DNS 验证)
+cloudflare:
+  # Cloudflare API Token (必需)
+  # 获取方式: https://dash.cloudflare.com/profile/api-tokens
+  # 创建自定义令牌，权限设置为:
+  # - Zone:Zone:Read (所有区域)
+  # - Zone:DNS:Edit (特定区域或所有区域)
+  api_token: "your-cloudflare-api-token"
+
+  # Zone ID (可选，程序会自动获取)
+  # 可在 Cloudflare 控制台的域名概览页面右侧找到
+  zone_id:
+
+  # Account ID (可选)
+  # 可在 Cloudflare 控制台右侧边栏找到
+  account_id: "your-cloudflare-account-id"
+
+# 数据库配置
+database:
+  path: "./db/cert_manager.db"
+
+# 日志配置
+logging:
+  level: "INFO"
+  file: "./logs/cert_manager.log"
+  max_size: "100MB"
+  backup_count: 3
+
+# 服务器配置示例
+servers:
+  - name: "nginx-server"
+    host: "10.0.0.1"
+    port: 22
+    username: "root"
+    identity_file: "~/.ssh/id_rsa"
+    cert_directory: "/etc/nginx/certs"
+    reload_command: "systemctl reload nginx"
+    reload: true
+    enabled: true
+
+# 证书续期配置
+renewal:
+  # 提前多少天续期 (默认30天)
+  days_before_expiry: 7
