@@ -203,7 +203,7 @@ def list(ctx):
 @click.option('--server', '-s', help='指定服务器名称')
 @click.option('--identity', '-i', help='SSH 密钥文件路径')
 @click.option('--directory', '-d', help='证书部署目录')
-@click.option('--reload', '-r', help='重载命令')
+@click.option('--reload', '-r', is_flag=True, help='重载命令')
 @click.pass_context
 def deploy(ctx, domain, all_server, server, identity, directory, reload):
     """部署证书到服务器"""
@@ -220,7 +220,7 @@ def deploy(ctx, domain, all_server, server, identity, directory, reload):
         if directory:
             deploy_options['cert_directory'] = directory
         if reload:
-            deploy_options['reload_command'] = reload
+            deploy_options['reload'] = reload
 
         if all_server:
             logger.info("目标服务器: 所有启用的服务器")

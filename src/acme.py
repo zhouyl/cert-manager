@@ -391,8 +391,8 @@ class ACMEManager:
             cert = x509.load_pem_x509_certificate(cert_data, default_backend())
 
             return {
-                'issued_at': cert.not_valid_before,
-                'expires_at': cert.not_valid_after
+                'issued_at': getattr(cert, "not_valid_before_utc", cert.not_valid_before),
+                'expires_at': getattr(cert, "not_valid_after_utc", cert.not_valid_after)
             }
         except Exception as e:
             logger.error(f"读取证书信息失败: {e}")

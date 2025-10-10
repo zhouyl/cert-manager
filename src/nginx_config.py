@@ -56,7 +56,7 @@ class NginxConfigGenerator:
 # Domain: {domain}
 # Generated at: {generated_at}
 
-ssl_certificate {cert_directory}/cert.pem;
+ssl_certificate {cert_directory}/fullchain.pem;
 ssl_certificate_key {cert_directory}/privkey.pem;
 ssl_trusted_certificate {cert_directory}/fullchain.pem;
 ssl_session_cache shared:SSL:10m;

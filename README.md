@@ -71,5 +71,5 @@ python cert_manager.py deploy example.com -s nginx-server -r "systemctl reload n
 
 ```bash
 # 可以配置定时任务 (每天执行一次)
-bash scripts/auto_renew.sh
+0 0 * * * python cert_manager.py renew
 ```
