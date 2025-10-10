@@ -47,9 +47,23 @@ servers:
     port: 22
     username: "root"
     identity_file: "~/.ssh/id_rsa"
-    cert_directory: "/etc/nginx/certs"
+
+    # 证书目录 (在服务器上的绝对路径)
+    cert_directory: "/etc/nginx/certs/{domain}"
+
+    # 证书配置文件路径 (在服务器上的绝对路径，默认为 {cert_directory}/cert.conf)
+    cert_conf_file: "/etc/nginx/certs/{domain}.conf"
+
+    # 证书文件所有者 (格式: user:group)
+    cert_owner: "www:www"
+
+    # 重载命令 (用于重新加载服务器上的配置，如 nginx)
     reload_command: "systemctl reload nginx"
+
+    # 是否在部署后自动重载配置
     reload: true
+
+    # 是否启用此服务器的证书部署
     enabled: true
 
 # 证书续期配置

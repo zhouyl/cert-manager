@@ -119,7 +119,7 @@ class DatabaseManager:
                          ''')
 
             conn.commit()
-            logger.info("数据库初始化完成")
+            logger.debug("数据库初始化完成")
 
     def check_acme_rate_limit(self, domain: str, limit_minutes: int = 5) -> bool:
         """检查 ACME 速率限制

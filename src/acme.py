@@ -39,7 +39,7 @@ class ACMEManager:
                 api_token=cf_config.get('api_token'),
                 zone_id=cf_config.get('zone_id')
             )
-            logger.info("Cloudflare DNS 客户端初始化成功")
+            logger.debug("Cloudflare DNS 客户端初始化成功")
         except Exception as e:
             logger.warning(f"Cloudflare DNS 客户端初始化失败: {e}")
             self.cf_dns = None
@@ -245,7 +245,6 @@ class ACMEManager:
                 '--server', ca,
                 '--dns', 'dns_cf',
                 '--force',  # 强制执行，即使记录已存在
-                '--debug',  # 启用调试模式
                 '--cert-file', os.path.join(domain_cert_dir, 'cert.pem'),
                 '--key-file', os.path.join(domain_cert_dir, 'privkey.pem'),
                 '--fullchain-file', os.path.join(domain_cert_dir, 'fullchain.pem'),

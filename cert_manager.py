@@ -16,6 +16,7 @@ from config import ConfigManager
 from database import DatabaseManager
 from acme import ACMEManager
 from deploy import DeployManager
+from nginx_config import NginxConfigGenerator
 
 
 def setup_logging(config_manager: ConfigManager):
@@ -44,7 +45,7 @@ def setup_logging(config_manager: ConfigManager):
 
     # 控制台处理器 - 简洁格式
     console_handler = logging.StreamHandler(sys.stdout)
-    console_formatter = logging.Formatter('[%(asctime)s][%(levelname)s] - %(message)s')
+    console_formatter = logging.Formatter('[%(levelname)s] %(message)s')
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
 
@@ -174,19 +175,22 @@ def list(ctx):
             logger.info("没有找到证书")
             return
 
-        logger.info(f"{'域名':<25} {'状态':<12} {'过期时间':<12} {'剩余天数':<10} {'验证状态':<10}")
+        logger.info("-" * 80)
+        logger.info(f"{'DOMAIN':<25} {'STATUS':<12} {'EXPIRES AT':<15} {'DAYS':<10} {'VERIFY':<10}")
         logger.info("-" * 80)
 
         for cert in certificates:
             domain = cert['domain']
-            status = cert['status_desc']
+            status = cert['status']
             expires_at = cert['expires_at'][:10]  # 只显示日期部分
             days_left = cert['days_left']
 
             # 检查域名验证状态
-            verify_status = "✅ 已验证" if cert.get('status') == 'active' else "❌ 未验证"
+            verify_status = "✅" if cert.get('status') == 'active' else "❌"
 
-            logger.info(f"{domain:<25} {status:<12} {expires_at:<12} {days_left:<10} {verify_status:<10}")
+            logger.info(f"{domain:<25} {status:<12} {expires_at:<15} {days_left:<10} {verify_status:<10}")
+
+        logger.info("-" * 80)
 
     except Exception as e:
         logger.error(f"❌ 列出证书失败: {e}")
@@ -195,7 +199,7 @@ def list(ctx):
 
 @cli.command()
 @click.argument('domain')
-@click.option('--all-server', is_flag=True, help='部署到所有启用的服务器')
+@click.option('--all-server', '-a', is_flag=True, help='部署到所有启用的服务器')
 @click.option('--server', '-s', help='指定服务器名称')
 @click.option('--identity', '-i', help='SSH 密钥文件路径')
 @click.option('--directory', '-d', help='证书部署目录')
@@ -319,6 +323,67 @@ def test_server(ctx, name):
 
     except Exception as e:
         logger.error(f"❌ 测试服务器连接失败: {e}")
+        sys.exit(1)
+
+
+@cli.group()
+def nginx():
+    """Nginx 配置管理"""
+    pass
+
+
+@nginx.command('preview')
+@click.argument('domain')
+@click.option('--server', '-s', help='指定服务器名称')
+@click.pass_context
+def preview_nginx_config(ctx, domain, server):
+    """预览 Nginx 配置文件内容"""
+    logger = logging.getLogger(__name__)
+    config_manager = ctx.obj['config']
+
+    try:
+        nginx_config = NginxConfigGenerator(config_manager)
+        servers = config_manager.get_servers()
+
+        if server:
+            # 查找指定服务器
+            server_config = None
+            for srv in servers:
+                if srv.get('name') == server:
+                    server_config = srv
+                    break
+
+            if not server_config:
+                logger.error(f"❌ 未找到服务器: {server}")
+                sys.exit(1)
+
+            servers = [server_config]
+
+        for server_config in servers:
+            if not server_config.get('enabled', True):
+                continue
+
+            server_name = server_config.get('name', 'unknown')
+
+            if not nginx_config.should_generate_config(server_config):
+                logger.info(f"服务器 {server_name} 未配置 cert_conf_file，跳过")
+                continue
+
+            logger.info(f"=== 服务器: {server_name} ===")
+
+            config_content = nginx_config.generate_config_file_content(domain, server_config)
+            config_path = nginx_config.get_config_file_path(domain, server_config)
+
+            logger.info(f"配置文件路径: {config_path}")
+            logger.info("配置文件内容:")
+            logger.info("-" * 50)
+            logger.info(config_content)
+            logger.info("-" * 50)
+            logger.info("")
+
+    except Exception as e:
+        logger.error(f"❌ 预览 Nginx 配置失败: {e}")
+        logger.exception("预览 Nginx 配置异常详情:")
         sys.exit(1)
 
 

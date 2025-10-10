@@ -63,18 +63,12 @@ class ConfigManager:
             'logging': {
                 'level': 'INFO',
                 'file': './logs/cert_manager.log',
-                'max_size': '10MB',
-                'backup_count': 5
+                'max_size': '100MB',
+                'backup_count': 3
             },
             'servers': [],
             'renewal': {
                 'days_before_expiry': 30,
-                'check_interval': 24
-            },
-            'notifications': {
-                'email': {
-                    'enabled': False
-                }
             }
         }
 
@@ -143,48 +137,9 @@ class ConfigManager:
         """获取服务器配置列表"""
         return self.get('servers', [])
 
-    def add_server(self, server_config: Dict[str, Any]):
-        """添加服务器配置
-        
-        Args:
-            server_config: 服务器配置字典
-        """
-        servers = self.get_servers()
-
-        # 检查是否已存在同名服务器
-        for i, server in enumerate(servers):
-            if server.get('name') == server_config.get('name'):
-                servers[i] = server_config
-                self.set('servers', servers)
-                return
-
-        # 添加新服务器
-        servers.append(server_config)
-        self.set('servers', servers)
-
-    def remove_server(self, server_name: str) -> bool:
-        """移除服务器配置
-        
-        Args:
-            server_name: 服务器名称
-            
-        Returns:
-            是否成功移除
-        """
-        servers = self.get_servers()
-        original_count = len(servers)
-
-        servers = [s for s in servers if s.get('name') != server_name]
-        self.set('servers', servers)
-
-        return len(servers) < original_count
-
     def get_renewal_config(self) -> Dict[str, Any]:
         """获取续期配置"""
-        return self.get('renewal', {
-            'days_before_expiry': 30,
-            'check_interval': 24
-        })
+        return self.get('renewal', {'days_before_expiry': 7})
 
     def get_logging_config(self) -> Dict[str, Any]:
         """获取日志配置"""
