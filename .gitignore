@@ -1,4 +1,5 @@
 /config/config.yaml
-__pycache__
 /.idea
-/bin
+/.qoder
+/.vscode
+__pycache__

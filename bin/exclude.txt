@@ -1,0 +1,10 @@
+logs/
+certs/
+bin/
+config/config.yaml
+docs/
+db/
+__pycache__/
+.idea/
+.qoder/
+.git/
