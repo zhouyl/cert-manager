@@ -118,44 +118,23 @@ def issue(ctx, domain):
 
 
 @cli.command()
-@click.argument('domain', required=False)
+@click.argument('domain', required=True)
 @click.pass_context
 def renew(ctx, domain):
-    """续期证书"""
+    """执行域名手动续期"""
     logger = logging.getLogger(__name__)
     acme_manager = ctx.obj['acme']
 
     try:
-        if domain:
-            # 续期指定域名
-            logger.info(f"开始续期证书: {domain}")
-            success = acme_manager.renew_certificate(domain)
+        # 续期指定域名
+        logger.info(f"开始续期证书: {domain}")
+        success = acme_manager.renew_certificate(domain)
 
-            if success:
-                logger.info(f"✅ 证书续期成功: {domain}")
-            else:
-                logger.error(f"❌ 证书续期失败: {domain}")
-                sys.exit(1)
+        if success:
+            logger.info(f"✅ 证书续期成功: {domain}")
         else:
-            # 自动续期所有需要续期的证书
-            logger.info("检查需要续期的证书...")
-            results = acme_manager.auto_renew_all()
-
-            if not results:
-                logger.info("✅ 没有需要续期的证书")
-                return
-
-            success_count = sum(1 for success in results.values() if success)
-            total_count = len(results)
-
-            logger.info(f"续期结果: {success_count}/{total_count} 成功")
-
-            for domain, success in results.items():
-                status = "✅" if success else "❌"
-                logger.info(f"  {status} {domain}")
-
-            if success_count < total_count:
-                sys.exit(1)
+            logger.error(f"❌ 证书续期失败: {domain}")
+            sys.exit(1)
 
     except Exception as e:
         logger.error(f"❌ 续期失败: {e}, " + traceback.format_exc())
@@ -165,9 +144,10 @@ def renew(ctx, domain):
 @cli.command()
 @click.pass_context
 def list(ctx):
-    """列出通过本项目申请的证书域名及状态"""
+    """列出所有域名，包括自动续期状态"""
     logger = logging.getLogger(__name__)
     acme_manager = ctx.obj['acme']
+    db_manager = ctx.obj['db']
 
     try:
         certificates = acme_manager.list_certificates()
@@ -176,9 +156,12 @@ def list(ctx):
             logger.info("没有找到证书")
             return
 
-        logger.info("-" * 80)
-        logger.info(f"{'ID':<8} {'DOMAIN':<25} {'STATUS':<12} {'EXPIRES AT':<15} {'DAYS':<10} {'VERIFY':<10}")
-        logger.info("-" * 80)
+        # 获取域名的自动续期状态
+        domains_info = {d['domain']: d for d in db_manager.list_domains()}
+
+        logger.info("-" * 90)
+        logger.info(f"{'ID':<6} {'DOMAIN':<25} {'STATUS':<8} {'EXPIRES AT':<15} {'DAYS':<6} {'RENEW':<7} {'VERIFY':<8}")
+        logger.info("-" * 90)
 
         for cert in certificates:
             id = cert['id']
@@ -190,9 +173,13 @@ def list(ctx):
             # 检查域名验证状态
             verify_status = "✅" if cert.get('status') == 'active' else "❌"
 
-            logger.info(f"{id:<10} {domain:<25} {status:<12} {expires_at:<15} {days_left:<10} {verify_status:<10}")
+            # 获取自动续期状态
+            domain_info = domains_info.get(domain, {})
+            auto_renew_status = "✅" if domain_info.get('auto_renew', 1) else "❌"
 
-        logger.info("-" * 80)
+            logger.info(f"{id:<6} {domain:<25} {status:<8} {expires_at:<15} {days_left:<6} {auto_renew_status:<7} {verify_status:<8}")
+
+        logger.info("-" * 90)
 
     except Exception as e:
         logger.error(f"❌ 列出证书失败: {e}")
@@ -380,6 +367,117 @@ def test_server(ctx, name):
 
     except Exception as e:
         logger.error(f"❌ 测试服务器连接失败: {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('domain', required=False)
+@click.option('--exec', 'exec_flag', is_flag=True, help='执行自动续期')
+@click.option('--on', 'enable_flag', is_flag=True, help='启用域名的自动续期')
+@click.option('--off', 'disable_flag', is_flag=True, help='禁用域名的自动续期')
+@click.pass_context
+def auto_renew(ctx, domain, exec_flag, enable_flag, disable_flag):
+    """自动续期管理
+
+    使用方式：
+
+    1. 显示帮助信息：
+       python cert_manager.py auto-renew
+
+    2. 执行自动续期（为所有已开启的域名续期）：
+       python cert_manager.py auto-renew --exec
+
+    3. 启用域名的自动续期：
+       python cert_manager.py auto-renew <domain> --on
+
+    4. 禁用域名的自动续期：
+       python cert_manager.py auto-renew <domain> --off
+    """
+    logger = logging.getLogger(__name__)
+    acme_manager = ctx.obj['acme']
+    db_manager = ctx.obj['db']
+
+    try:
+        # 如果没有任何标志和域名，显示帮助信息
+        if not exec_flag and not enable_flag and not disable_flag and not domain:
+            logger.info("自动续期管理")
+            logger.info("-" * 60)
+            logger.info("使用方式：")
+            logger.info("")
+            logger.info("1. 显示帮助信息：")
+            logger.info("   python cert_manager.py auto-renew")
+            logger.info("")
+            logger.info("2. 执行自动续期（为所有已开启的域名续期）：")
+            logger.info("   python cert_manager.py auto-renew --exec")
+            logger.info("")
+            logger.info("3. 启用域名的自动续期：")
+            logger.info("   python cert_manager.py auto-renew <domain> --on")
+            logger.info("")
+            logger.info("4. 禁用域名的自动续期：")
+            logger.info("   python cert_manager.py auto-renew <domain> --off")
+            logger.info("-" * 60)
+            return
+
+        # 执行自动续期
+        if exec_flag:
+            if domain or enable_flag or disable_flag:
+                logger.error("❌ --exec 标志不能与其他参数一起使用")
+                sys.exit(1)
+
+            logger.info("检查需要续期的证书...")
+            results = acme_manager.auto_renew_all()
+
+            if not results:
+                logger.info("✅ 没有需要续期的证书")
+                return
+
+            success_count = sum(1 for success in results.values() if success)
+            total_count = len(results)
+
+            logger.info(f"续期结果: {success_count}/{total_count} 成功")
+
+            for domain_name, success in results.items():
+                status = "✅" if success else "❌"
+                logger.info(f"  {status} {domain_name}")
+
+            if success_count < total_count:
+                sys.exit(1)
+
+        # 管理单个域名的自动续期状态
+        elif domain:
+            domain_info = db_manager.get_domain(domain)
+            if not domain_info:
+                logger.error(f"❌ 未找到域名: {domain}")
+                sys.exit(1)
+
+            if enable_flag and disable_flag:
+                logger.error("❌ 不能同时使用 --on 和 --off 标志")
+                sys.exit(1)
+
+            if not enable_flag and not disable_flag:
+                logger.error(f"❌ 请指定 --on 或 --off 标志来管理域名 {domain} 的自动续期")
+                sys.exit(1)
+
+            if enable_flag:
+                success = db_manager.update_domain_auto_renew(domain, True)
+                if success:
+                    logger.info(f"✅ 已启用域名 {domain} 的自动续期")
+                else:
+                    logger.error(f"❌ 启用自动续期失败: {domain}")
+                    sys.exit(1)
+            elif disable_flag:
+                success = db_manager.update_domain_auto_renew(domain, False)
+                if success:
+                    logger.info(f"✅ 已禁用域名 {domain} 的自动续期")
+                else:
+                    logger.error(f"❌ 禁用自动续期失败: {domain}")
+                    sys.exit(1)
+        else:
+            logger.error("❌ 无效的命令组合")
+            sys.exit(1)
+
+    except Exception as e:
+        logger.error(f"❌ 操作失败: {e}, " + traceback.format_exc())
         sys.exit(1)
 
 

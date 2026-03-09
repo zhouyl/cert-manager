@@ -46,6 +46,7 @@ class DatabaseManager:
                          (
                              id         INTEGER PRIMARY KEY AUTOINCREMENT,
                              domain     TEXT UNIQUE NOT NULL,
+                             auto_renew INTEGER DEFAULT 1,
                              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                          )
@@ -117,7 +118,26 @@ class DatabaseManager:
                          ''')
 
             conn.commit()
+
+            # 迁移：为现有的 domains 表添加 auto_renew 字段（如果不存在）
+            self._migrate_add_auto_renew_column(conn)
+
             logger.debug("数据库初始化完成")
+
+    def _migrate_add_auto_renew_column(self, conn):
+        """迁移：为 domains 表添加 auto_renew 字段（如果不存在）"""
+        try:
+            # 检查 auto_renew 列是否存在
+            cursor = conn.execute("PRAGMA table_info(domains)")
+            columns = [row[1] for row in cursor.fetchall()]
+
+            if 'auto_renew' not in columns:
+                logger.info("迁移：为 domains 表添加 auto_renew 字段...")
+                conn.execute('ALTER TABLE domains ADD COLUMN auto_renew INTEGER DEFAULT 1')
+                conn.commit()
+                logger.info("✅ 迁移完成：auto_renew 字段已添加")
+        except Exception as e:
+            logger.warning(f"迁移 auto_renew 字段时出现警告: {e}")
 
     def check_acme_rate_limit(self, domain: str, limit_minutes: int = 5) -> bool:
         """检查 ACME 速率限制
@@ -265,6 +285,33 @@ class DatabaseManager:
         """列出所有域名"""
         with self.get_connection() as conn:
             cursor = conn.execute('SELECT * FROM domains ORDER BY domain')
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_domain_auto_renew(self, domain: str, auto_renew: bool) -> bool:
+        """更新域名的自动续期状态
+
+        Args:
+            domain: 域名
+            auto_renew: 是否启用自动续期
+
+        Returns:
+            是否更新成功
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                'UPDATE domains SET auto_renew = ?, updated_at = CURRENT_TIMESTAMP WHERE domain = ?',
+                (1 if auto_renew else 0, domain)
+            )
+            return cursor.rowcount > 0
+
+    def get_auto_renew_domains(self) -> List[Dict]:
+        """获取所有启用自动续期的域名
+
+        Returns:
+            启用自动续期的域名列表
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute('SELECT * FROM domains WHERE auto_renew = 1 ORDER BY domain')
             return [dict(row) for row in cursor.fetchall()]
 
     def add_certificate(self, domain_id: int, cert_path: str, key_path: str,

@@ -533,12 +533,20 @@ class ACMEManager:
         return domains_to_renew
 
     def auto_renew_all(self) -> Dict[str, bool]:
-        """自动续期所有需要续期的证书
+        """自动续期所有需要续期且启用了自动续期的证书
 
         Returns:
             续期结果字典 {域名: 是否成功}
         """
         domains_to_renew = self.check_renewals()
+
+        # 获取启用了自动续期的域名
+        auto_renew_domains = self.db.get_auto_renew_domains()
+        auto_renew_domain_names = {d['domain'] for d in auto_renew_domains}
+
+        # 过滤出启用了自动续期的域名
+        domains_to_renew = [d for d in domains_to_renew if d in auto_renew_domain_names]
+
         results = {}
 
         for domain in domains_to_renew:
