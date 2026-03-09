@@ -6,6 +6,7 @@
 import logging
 import os
 import sys
+import traceback
 
 import click
 
@@ -157,7 +158,7 @@ def renew(ctx, domain):
                 sys.exit(1)
 
     except Exception as e:
-        logger.error(f"❌ 续期失败: {e}")
+        logger.error(f"❌ 续期失败: {e}, " + traceback.format_exc())
         sys.exit(1)
 
 
@@ -176,10 +177,11 @@ def list(ctx):
             return
 
         logger.info("-" * 80)
-        logger.info(f"{'DOMAIN':<25} {'STATUS':<12} {'EXPIRES AT':<15} {'DAYS':<10} {'VERIFY':<10}")
+        logger.info(f"{'ID':<8} {'DOMAIN':<25} {'STATUS':<12} {'EXPIRES AT':<15} {'DAYS':<10} {'VERIFY':<10}")
         logger.info("-" * 80)
 
         for cert in certificates:
+            id = cert['id']
             domain = cert['domain']
             status = cert['status']
             expires_at = cert['expires_at'][:10]  # 只显示日期部分
@@ -188,7 +190,7 @@ def list(ctx):
             # 检查域名验证状态
             verify_status = "✅" if cert.get('status') == 'active' else "❌"
 
-            logger.info(f"{domain:<25} {status:<12} {expires_at:<15} {days_left:<10} {verify_status:<10}")
+            logger.info(f"{id:<10} {domain:<25} {status:<12} {expires_at:<15} {days_left:<10} {verify_status:<10}")
 
         logger.info("-" * 80)
 
@@ -246,6 +248,61 @@ def deploy(ctx, domain, all_server, server, identity, directory, reload):
 
     except Exception as e:
         logger.error(f"❌ 部署失败: {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('cert_id', type=int)
+@click.option('--force', '-f', is_flag=True, help='强制删除，不需要确认')
+@click.pass_context
+def delete(ctx, cert_id, force):
+    """删除证书及其相关记录"""
+    logger = logging.getLogger(__name__)
+    db_manager = ctx.obj['db']
+
+    try:
+        # 获取证书信息用于显示
+        with db_manager.get_connection() as conn:
+            cursor = conn.execute(
+                'SELECT c.id, d.domain, c.expires_at FROM certificates c '
+                'JOIN domains d ON c.domain_id = d.id WHERE c.id = ?',
+                (cert_id,)
+            )
+            cert_info = cursor.fetchone()
+
+        if not cert_info:
+            logger.error(f"❌ 未找到证书 ID: {cert_id}")
+            sys.exit(1)
+
+        domain = cert_info['domain']
+        expires_at = cert_info['expires_at']
+
+        logger.info(f"准备删除证书:")
+        logger.info(f"  证书 ID: {cert_id}")
+        logger.info(f"  域名: {domain}")
+        logger.info(f"  过期时间: {expires_at}")
+
+        # 如果没有 --force 标志，需要用户确认
+        if not force:
+            confirm = click.confirm("确认删除此证书及其相关记录吗?", default=False)
+            if not confirm:
+                logger.info("❌ 删除已取消")
+                return
+
+        # 执行删除
+        success = db_manager.delete_certificate_by_id(cert_id)
+
+        if success:
+            logger.info(f"✅ 证书删除成功!")
+            logger.info(f"  已删除证书 ID: {cert_id}")
+            logger.info(f"  已删除域名 {domain} 的相关证书申请记录")
+        else:
+            logger.error(f"❌ 证书删除失败: 未找到证书 ID {cert_id}")
+            sys.exit(1)
+
+    except Exception as e:
+        logger.error(f"❌ 删除证书失败: {e}")
+        logger.exception("删除证书异常详情:")
         sys.exit(1)
 
 

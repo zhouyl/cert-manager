@@ -6,7 +6,7 @@ ACME 证书申请模块
 import logging
 import os
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from cryptography import x509
@@ -390,14 +390,22 @@ class ACMEManager:
 
             cert = x509.load_pem_x509_certificate(cert_data, default_backend())
 
+            if hasattr(cert, "not_valid_before_utc"):
+                issued_at = cert.not_valid_before_utc
+                expires_at = cert.not_valid_after_utc
+            else:
+                # 老版本 cryptography：手动补 UTC
+                issued_at = cert.not_valid_before.replace(tzinfo=timezone.utc)
+                expires_at = cert.not_valid_after.replace(tzinfo=timezone.utc)
+
             return {
-                'issued_at': getattr(cert, "not_valid_before_utc", cert.not_valid_before),
-                'expires_at': getattr(cert, "not_valid_after_utc", cert.not_valid_after)
+                'issued_at': issued_at,
+                'expires_at': expires_at,
             }
         except Exception as e:
             logger.error(f"读取证书信息失败: {e}")
             # 如果无法读取证书，使用默认值
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             return {
                 'issued_at': now,
                 'expires_at': now + timedelta(days=90)  # Let's Encrypt 默认90天
@@ -516,8 +524,8 @@ class ACMEManager:
 
         for cert in expiring_certs:
             domain = cert['domain']
-            expires_at = datetime.fromisoformat(cert['expires_at'])
-            days_left = (expires_at - datetime.now()).days
+            expires_at = datetime.fromisoformat(cert['expires_at']).replace(tzinfo=timezone.utc)
+            days_left = (expires_at - datetime.now(timezone.utc)).days
 
             logger.info(f"证书即将过期: {domain}, 剩余 {days_left} 天")
             domains_to_renew.append(domain)
@@ -557,8 +565,8 @@ class ACMEManager:
 
         for cert in certificates:
             # 计算剩余天数
-            expires_at = datetime.fromisoformat(cert['expires_at'])
-            days_left = (expires_at - datetime.now()).days
+            expires_at = datetime.fromisoformat(cert['expires_at']).replace(tzinfo=timezone.utc)
+            days_left = (expires_at - datetime.now(tz=timezone.utc)).days
             cert['days_left'] = days_left
 
             # 判断状态

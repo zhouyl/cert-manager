@@ -6,9 +6,9 @@ Nginx 配置生成模块
 用于生成 Nginx SSL 证书配置文件
 """
 
-import os
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class NginxConfigGenerator:
     """Nginx 配置生成器"""
-    
+
     def __init__(self, config_manager):
         """初始化 Nginx 配置生成器
         
@@ -25,13 +25,13 @@ class NginxConfigGenerator:
         """
         self.config_manager = config_manager
         self.template_path = self._get_template_path()
-    
+
     def _get_template_path(self) -> str:
         """获取模板文件路径"""
         # 模板文件位于 config 目录下
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         return os.path.join(project_root, 'config', 'nginx-ssl.conf.template')
-    
+
     def _load_template(self) -> str:
         """加载模板文件内容
         
@@ -48,7 +48,7 @@ class NginxConfigGenerator:
         except Exception as e:
             logger.error(f"读取 Nginx 配置模板失败: {e}")
             return self._get_default_template()
-    
+
     def _get_default_template(self) -> str:
         """获取默认模板内容"""
         return """# Nginx SSL Certificate Configuration Template
@@ -64,9 +64,9 @@ ssl_session_timeout 1h;
 ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE:ECDH:AES:HIGH:!NULL:!aNULL:!MD5:!ADH:!RC4;
 ssl_protocols TLSv1.2 TLSv1.3;
 ssl_prefer_server_ciphers on;"""
-    
-    def generate_config(self, domain: str, cert_directory: str, 
-                       custom_template: Optional[str] = None) -> str:
+
+    def generate_config(self, domain: str, cert_directory: str,
+                        custom_template: Optional[str] = None) -> str:
         """生成 Nginx 配置内容
         
         Args:
@@ -79,13 +79,13 @@ ssl_prefer_server_ciphers on;"""
         """
         # 使用自定义模板或加载默认模板
         template = custom_template or self._load_template()
-        
+
         # 替换模板变量
         config_content = template.replace('{domain}', domain)
         config_content = config_content.replace('{cert_directory}', cert_directory)
         config_content = config_content.replace('{generated_at}',
-                                              datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        
+                                                datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+
         return config_content
 
     def get_cert_directory(self, domain: str, server_config: Dict) -> str:
@@ -99,7 +99,7 @@ ssl_prefer_server_ciphers on;"""
             证书目录
         """
         return server_config.get('cert_directory', '/etc/nginx/certs/{domain}').replace('{domain}', domain)
-    
+
     def get_config_file_path(self, domain: str, server_config: Dict) -> Optional[str]:
         """获取配置文件路径
         
@@ -115,7 +115,7 @@ ssl_prefer_server_ciphers on;"""
             'cert_conf_file',
             os.path.join(self.get_cert_directory(domain, server_config), 'cert.conf')
         )
-        
+
         # 替换域名变量
         config_path = cert_conf_file.replace('{domain}', domain)
         return config_path

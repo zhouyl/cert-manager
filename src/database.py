@@ -6,7 +6,7 @@
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -55,26 +55,24 @@ class DatabaseManager:
             conn.execute('''
                          CREATE TABLE IF NOT EXISTS certificates
                          (
-                             id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                             domain_id      INTEGER   NOT NULL,
-                             cert_path      TEXT      NOT NULL,
-                             key_path       TEXT      NOT NULL,
-                             fullchain_path TEXT      NOT NULL,
-                             chain_path     TEXT      NOT NULL,
-                             cert_content   TEXT,
-                             key_content    TEXT,
+                             id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                             domain_id         INTEGER   NOT NULL,
+                             cert_path         TEXT      NOT NULL,
+                             key_path          TEXT      NOT NULL,
+                             fullchain_path    TEXT      NOT NULL,
+                             chain_path        TEXT      NOT NULL,
+                             cert_content      TEXT,
+                             key_content       TEXT,
                              fullchain_content TEXT,
-                             chain_content  TEXT,
-                             issued_at      TIMESTAMP NOT NULL,
-                             expires_at     TIMESTAMP NOT NULL,
-                             status         TEXT      DEFAULT 'active',
-                             created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                             updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                             chain_content     TEXT,
+                             issued_at         TIMESTAMP NOT NULL,
+                             expires_at        TIMESTAMP NOT NULL,
+                             status            TEXT      DEFAULT 'active',
+                             created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                             updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                              FOREIGN KEY (domain_id) REFERENCES domains (id)
                          )
                          ''')
-
-
 
             # 部署记录表
             conn.execute('''
@@ -109,12 +107,12 @@ class DatabaseManager:
             conn.execute('''
                          CREATE TABLE IF NOT EXISTS acme_rate_limits
                          (
-                             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                             domain      TEXT      NOT NULL UNIQUE,
-                             last_attempt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                             attempt_count INTEGER DEFAULT 1,
-                             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                             updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                             id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                             domain        TEXT NOT NULL UNIQUE,
+                             last_attempt  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                             attempt_count INTEGER   DEFAULT 1,
+                             created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                             updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                          )
                          ''')
 
@@ -133,14 +131,14 @@ class DatabaseManager:
         """
         with self.get_connection() as conn:
             cursor = conn.execute('''
-                SELECT last_attempt, attempt_count
-                FROM acme_rate_limits
-                WHERE domain = ?
-            ''', (domain,))
+                                  SELECT last_attempt, attempt_count
+                                  FROM acme_rate_limits
+                                  WHERE domain = ?
+                                  ''', (domain,))
 
             row = cursor.fetchone()
             # 使用 UTC 时间与数据库保持一致
-            now = datetime.utcnow()
+            now = datetime.now(tz=timezone.utc)
 
             if not row:
                 # 首次请求，记录并允许
@@ -151,7 +149,7 @@ class DatabaseManager:
             last_attempt_str = row['last_attempt']
             # 如果时间字符串没有时区信息，假设是本地时间
             if '+' not in last_attempt_str and 'Z' not in last_attempt_str:
-                last_attempt = datetime.fromisoformat(last_attempt_str)
+                last_attempt = datetime.fromisoformat(last_attempt_str).replace(tzinfo=timezone.utc)
             else:
                 last_attempt = datetime.fromisoformat(last_attempt_str.replace('Z', '+00:00'))
 
@@ -184,30 +182,29 @@ class DatabaseManager:
             if reset:
                 # 重置计数
                 conn.execute('''
-                    UPDATE acme_rate_limits
-                    SET last_attempt = CURRENT_TIMESTAMP,
-                        attempt_count = 1,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE domain = ?
-                ''', (domain,))
+                             UPDATE acme_rate_limits
+                             SET last_attempt  = CURRENT_TIMESTAMP,
+                                 attempt_count = 1,
+                                 updated_at    = CURRENT_TIMESTAMP
+                             WHERE domain = ?
+                             ''', (domain,))
             elif increment:
                 # 只增加计数，不更新时间
                 conn.execute('''
-                    UPDATE acme_rate_limits
-                    SET attempt_count = attempt_count + 1,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE domain = ?
-                ''', (domain,))
+                             UPDATE acme_rate_limits
+                             SET attempt_count = attempt_count + 1,
+                                 updated_at    = CURRENT_TIMESTAMP
+                             WHERE domain = ?
+                             ''', (domain,))
             else:
                 # 插入或更新记录
                 conn.execute('''
-                    INSERT INTO acme_rate_limits (domain, last_attempt, attempt_count)
-                    VALUES (?, CURRENT_TIMESTAMP, 1)
-                    ON CONFLICT(domain) DO UPDATE SET
-                        last_attempt = CURRENT_TIMESTAMP,
-                        attempt_count = attempt_count + 1,
-                        updated_at = CURRENT_TIMESTAMP
-                ''', (domain,))
+                             INSERT INTO acme_rate_limits (domain, last_attempt, attempt_count)
+                             VALUES (?, CURRENT_TIMESTAMP, 1)
+                             ON CONFLICT(domain) DO UPDATE SET last_attempt  = CURRENT_TIMESTAMP,
+                                                               attempt_count = attempt_count + 1,
+                                                               updated_at    = CURRENT_TIMESTAMP
+                             ''', (domain,))
 
             conn.commit()
 
@@ -222,8 +219,10 @@ class DatabaseManager:
         """
         with self.get_connection() as conn:
             cursor = conn.execute('''
-                SELECT * FROM acme_rate_limits WHERE domain = ?
-            ''', (domain,))
+                                  SELECT *
+                                  FROM acme_rate_limits
+                                  WHERE domain = ?
+                                  ''', (domain,))
 
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -294,9 +293,9 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.execute('''
                                   INSERT INTO certificates
-                                      (domain_id, cert_path, key_path, fullchain_path, chain_path,
-                                       cert_content, key_content, fullchain_content, chain_content,
-                                       issued_at, expires_at)
+                                  (domain_id, cert_path, key_path, fullchain_path, chain_path,
+                                   cert_content, key_content, fullchain_content, chain_content,
+                                   issued_at, expires_at)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                   ''', (domain_id, cert_path, key_path, fullchain_path, chain_path,
                                         cert_content, key_content, fullchain_content, chain_content,
@@ -370,10 +369,6 @@ class DatabaseManager:
                 (status, cert_id)
             )
 
-
-
-
-
     def add_certificate_request(self, domain: str, challenge_record_id: str = None,
                                 challenge_value: str = None) -> int:
         """添加证书申请记录
@@ -425,6 +420,34 @@ class DatabaseManager:
                              updated_at = CURRENT_TIMESTAMP
                          WHERE domain = ?
                          ''', (status, domain))
+
+    def delete_certificate_by_id(self, cert_id: int) -> bool:
+        """根据证书 ID 删除证书及其相关记录
+
+        Args:
+            cert_id: 证书ID
+
+        Returns:
+            是否删除成功
+        """
+        with self.get_connection() as conn:
+            try:
+                # 获取证书信息，以便获取关联的域名
+                cursor = conn.execute(
+                    'SELECT c.id, d.domain FROM certificates c JOIN domains d ON c.domain_id = d.id WHERE c.id = ?',
+                    (cert_id,)
+                )
+                cert_info = cursor.fetchone()
+
+                if not cert_info:
+                    return False
+
+                # 删除证书记录
+                conn.execute('DELETE FROM certificates WHERE id = ?', (cert_id,))
+
+                return True
+            except Exception as e:
+                raise Exception(f"删除证书失败: {e}")
 
     def delete_certificate_request(self, domain: str):
         """删除证书申请记录
