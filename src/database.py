@@ -46,7 +46,7 @@ class DatabaseManager:
                          (
                              id         INTEGER PRIMARY KEY AUTOINCREMENT,
                              domain     TEXT UNIQUE NOT NULL,
-                             auto_renew INTEGER DEFAULT 1,
+                             auto_renew INTEGER   DEFAULT 1,
                              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                          )
@@ -468,34 +468,6 @@ class DatabaseManager:
                          WHERE domain = ?
                          ''', (status, domain))
 
-    def delete_certificate_by_id(self, cert_id: int) -> bool:
-        """根据证书 ID 删除证书及其相关记录
-
-        Args:
-            cert_id: 证书ID
-
-        Returns:
-            是否删除成功
-        """
-        with self.get_connection() as conn:
-            try:
-                # 获取证书信息，以便获取关联的域名
-                cursor = conn.execute(
-                    'SELECT c.id, d.domain FROM certificates c JOIN domains d ON c.domain_id = d.id WHERE c.id = ?',
-                    (cert_id,)
-                )
-                cert_info = cursor.fetchone()
-
-                if not cert_info:
-                    return False
-
-                # 删除证书记录
-                conn.execute('DELETE FROM certificates WHERE id = ?', (cert_id,))
-
-                return True
-            except Exception as e:
-                raise Exception(f"删除证书失败: {e}")
-
     def delete_certificate_request(self, domain: str):
         """删除证书申请记录
 
@@ -504,3 +476,49 @@ class DatabaseManager:
         """
         with self.get_connection() as conn:
             conn.execute('DELETE FROM certificate_requests WHERE domain = ?', (domain,))
+
+    def delete_domain_all_records(self, domain: str) -> bool:
+        """按域名删除所有相关记录（包括 acme_rate_limits、certificate_requests、certificates、deployments、domains）
+
+        Args:
+            domain: 域名
+
+        Returns:
+            是否删除成功
+        """
+        with self.get_connection() as conn:
+            try:
+                # 获取域名 ID
+                cursor = conn.execute('SELECT id FROM domains WHERE domain = ?', (domain,))
+                domain_row = cursor.fetchone()
+
+                if not domain_row:
+                    return False
+
+                domain_id = domain_row['id']
+
+                # 删除 acme_rate_limits 表中的记录
+                conn.execute('DELETE FROM acme_rate_limits WHERE domain = ?', (domain,))
+
+                # 删除 certificate_requests 表中的记录
+                conn.execute('DELETE FROM certificate_requests WHERE domain = ?', (domain,))
+
+                # 删除 deployments 表中的记录（通过 certificates 表关联）
+                conn.execute('''
+                             DELETE
+                             FROM deployments
+                             WHERE certificate_id IN (SELECT id
+                                                      FROM certificates
+                                                      WHERE domain_id = ?)
+                             ''', (domain_id,))
+
+                # 删除 certificates 表中的记录
+                conn.execute('DELETE FROM certificates WHERE domain_id = ?', (domain_id,))
+
+                # 删除 domains 表中的记录
+                conn.execute('DELETE FROM domains WHERE id = ?', (domain_id,))
+
+                conn.commit()
+                return True
+            except Exception as e:
+                raise Exception(f"删除域名记录失败: {e}")

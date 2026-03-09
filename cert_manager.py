@@ -95,8 +95,18 @@ def issue(ctx, domain):
     """申请证书 (通配符域名，使用 Cloudflare DNS 验证)"""
     logger = logging.getLogger(__name__)
     acme_manager = ctx.obj['acme']
+    db_manager = ctx.obj['db']
 
     try:
+        # 检查域名是否已存在
+        existing_domain = db_manager.get_domain(domain)
+        if existing_domain:
+            logger.error(f"❌ 域名已存在: {domain}")
+            logger.error(f"   域名 ID: {existing_domain['id']}")
+            logger.error(f"   创建时间: {existing_domain['created_at']}")
+            logger.info("💡 如果需要续期证书，请使用 renew 命令")
+            sys.exit(1)
+
         logger.info(f"开始为域名 {domain} 申请通配符证书...")
         logger.info("使用 Cloudflare DNS 验证...")
 
@@ -159,12 +169,11 @@ def list(ctx):
         # 获取域名的自动续期状态
         domains_info = {d['domain']: d for d in db_manager.list_domains()}
 
-        logger.info("-" * 90)
-        logger.info(f"{'ID':<6} {'DOMAIN':<25} {'STATUS':<8} {'EXPIRES AT':<15} {'DAYS':<6} {'RENEW':<7} {'VERIFY':<8}")
-        logger.info("-" * 90)
+        logger.info("-" * 100)
+        logger.info(f"{'DOMAIN ID':<10} {'DOMAIN':<25} {'STATUS':<8} {'EXPIRES AT':<15} {'DAYS':<6} {'RENEW':<7} {'VERIFY':<8}")
+        logger.info("-" * 100)
 
         for cert in certificates:
-            id = cert['id']
             domain = cert['domain']
             status = cert['status']
             expires_at = cert['expires_at'][:10]  # 只显示日期部分
@@ -173,13 +182,14 @@ def list(ctx):
             # 检查域名验证状态
             verify_status = "✅" if cert.get('status') == 'active' else "❌"
 
-            # 获取自动续期状态
+            # 获取自动续期状态和域名 ID
             domain_info = domains_info.get(domain, {})
+            domain_id = domain_info.get('id', 'N/A')
             auto_renew_status = "✅" if domain_info.get('auto_renew', 1) else "❌"
 
-            logger.info(f"{id:<6} {domain:<25} {status:<8} {expires_at:<15} {days_left:<6} {auto_renew_status:<7} {verify_status:<8}")
+            logger.info(f"{domain_id:<10} {domain:<25} {status:<8} {expires_at:<15} {days_left:<6} {auto_renew_status:<7} {verify_status:<8}")
 
-        logger.info("-" * 90)
+        logger.info("-" * 100)
 
     except Exception as e:
         logger.error(f"❌ 列出证书失败: {e}")
@@ -239,57 +249,70 @@ def deploy(ctx, domain, all_server, server, identity, directory, reload):
 
 
 @cli.command()
-@click.argument('cert_id', type=int)
+@click.argument('domain')
 @click.option('--force', '-f', is_flag=True, help='强制删除，不需要确认')
 @click.pass_context
-def delete(ctx, cert_id, force):
-    """删除证书及其相关记录"""
+def delete(ctx, domain, force):
+    """删除域名及其所有相关记录和证书文件"""
     logger = logging.getLogger(__name__)
     db_manager = ctx.obj['db']
+    config_manager = ctx.obj['config']
 
     try:
-        # 获取证书信息用于显示
-        with db_manager.get_connection() as conn:
-            cursor = conn.execute(
-                'SELECT c.id, d.domain, c.expires_at FROM certificates c '
-                'JOIN domains d ON c.domain_id = d.id WHERE c.id = ?',
-                (cert_id,)
-            )
-            cert_info = cursor.fetchone()
-
-        if not cert_info:
-            logger.error(f"❌ 未找到证书 ID: {cert_id}")
+        # 检查域名是否存在
+        domain_info = db_manager.get_domain(domain)
+        if not domain_info:
+            logger.error(f"❌ 未找到域名: {domain}")
             sys.exit(1)
 
-        domain = cert_info['domain']
-        expires_at = cert_info['expires_at']
+        domain_id = domain_info['id']
 
-        logger.info(f"准备删除证书:")
-        logger.info(f"  证书 ID: {cert_id}")
+        logger.info(f"准备删除域名及其所有相关数据:")
         logger.info(f"  域名: {domain}")
-        logger.info(f"  过期时间: {expires_at}")
+        logger.info(f"  域名 ID: {domain_id}")
+        logger.info("")
+        logger.info("将删除以下数据:")
+        logger.info("  1. acme_rate_limits 表中的记录")
+        logger.info("  2. certificate_requests 表中的记录")
+        logger.info("  3. deployments 表中的记录")
+        logger.info("  4. certificates 表中的记录")
+        logger.info("  5. domains 表中的记录")
+        logger.info("  6. certs/ 目录下的域名证书文件")
 
         # 如果没有 --force 标志，需要用户确认
         if not force:
-            confirm = click.confirm("确认删除此证书及其相关记录吗?", default=False)
+            confirm = click.confirm("确认删除此域名及其所有相关数据吗?", default=False)
             if not confirm:
                 logger.info("❌ 删除已取消")
                 return
 
-        # 执行删除
-        success = db_manager.delete_certificate_by_id(cert_id)
+        # 删除证书文件
+        cert_dir = os.path.join(config_manager.expand_path('certs'), domain)
+        if os.path.exists(cert_dir):
+            try:
+                import shutil
+                shutil.rmtree(cert_dir)
+                logger.info(f"✅ 已删除证书文件目录: {cert_dir}")
+            except Exception as e:
+                logger.warning(f"⚠️  删除证书文件目录失败: {e}")
+        else:
+            logger.info(f"ℹ️  证书文件目录不存在: {cert_dir}")
+
+        # 执行数据库删除
+        success = db_manager.delete_domain_all_records(domain)
 
         if success:
-            logger.info(f"✅ 证书删除成功!")
-            logger.info(f"  已删除证书 ID: {cert_id}")
-            logger.info(f"  已删除域名 {domain} 的相关证书申请记录")
+            logger.info(f"✅ 域名删除成功!")
+            logger.info(f"  已删除域名: {domain}")
+            logger.info(f"  已清理所有相关数据库记录")
+            logger.info(f"  已删除所有证书文件")
         else:
-            logger.error(f"❌ 证书删除失败: 未找到证书 ID {cert_id}")
+            logger.error(f"❌ 域名删除失败: 未找到域名 {domain}")
             sys.exit(1)
 
     except Exception as e:
-        logger.error(f"❌ 删除证书失败: {e}")
-        logger.exception("删除证书异常详情:")
+        logger.error(f"❌ 删除域名失败: {e}")
+        logger.exception("删除域名异常详情:")
         sys.exit(1)
 
 
